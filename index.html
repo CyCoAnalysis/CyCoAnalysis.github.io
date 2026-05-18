@@ -1,3 +1,442 @@
-<h1>CyCoAnalysis: Cybersecurity Conference Analysis</h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyCoAnalysis: Cybersecurity Conference Analysis</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f4f9;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        .conference-section {
+            background: white;
+            margin: 0 0 40px 0;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            text-align: left;
+        }
+        .conference-content {
+            width: 100%;
+            margin: 0 auto;
+        }
+        .flag-section {
+            display: block;
+            width: max-content;
+            text-align: left;
+            margin: 0 auto 20px auto;
+        }
+        .flag-section-container {
+            display: block;
+            min-width: 0;
+        }
+        .flag-section h4 {
+            display: block;
+            margin: 18px 0 8px;
+            color: #2c3e50;
+        }
+        .conference-title {
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+            margin-top: 0;
+            color: #2c3e50;
+            font-size: 1.5rem;
+        }
+        #selector-container {
+            max-width: 500px;
+            margin: 0 auto 30px auto;
+            text-align: center;
+        }
+        #selector-container label {
+            display: block;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        #conference-select {
+            width: 100%;
+            max-width: 400px;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            background: #fff;
+        }
+        .chart-container {
+            position: relative;
+            height: 400px;
+            width: 100%;
+        }
+        .binary-sequence {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            justify-content: center;
+            margin-top: 12px;
+        }
+        .binary-sequence-item {
+            width: 30px;
+            height: 30px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            line-height: 1;
+            color: #fff;
+            border: 1px solid #d1d5db;
+            cursor: default;
+            text-decoration: none;
+        }
+        .binary-sequence-item[href] {
+            cursor: pointer;
+        }
+        .binary-sequence-item.off {
+            background: #e2e8f0;
+            color: #495057;
+            border-color: #c4c8d2;
+        }
+        .loading {
+            text-align: center;
+            font-style: italic;
+            color: #7f8c8d;
+            margin-top: 50px;
+        }
+        footer {
+            text-align: center;
+            margin-top: 50px;
+            padding: 20px;
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>CyCoAnalysis: Cybersecurity Conference Analysis</h1>
+    </header>
 
-A more elaborate website is coming soon. For now, please check out our <a href="https://github.com/CyCoAnalysis/dataset">dataset</a> directly.
+    <div id="selector-container" class="conference-section" style="padding:18px 25px;">
+        <label for="conference-select">Choose a conference:</label>
+        <select id="conference-select">
+            <option value="">-- Select a conference --</option>
+        </select>
+    </div>
+
+    <div id="content"></div>
+
+    <footer>
+        <p>Check out the more extensive raw data in the <a href="https://github.com/CyCoAnalysis/dataset">CyCoAnalysis dataset</a>.</p>
+        <p>Note that the website is AI-generated, but the underlying data was collected manually.</p>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            init();
+        });
+
+        const conferenceNames = {
+            sp: 'S&P',
+            acsac: 'ACSAC',
+            asiaccs: 'ASIACCS',
+            ccs: 'CCS',
+            csf: 'CSF',
+            esorics: 'ESORICS',
+            eurosp: 'EuroS&P',
+            ndss: 'NDSS',
+            raid: 'RAID',
+            usenix: 'USENIX Security'
+        };
+
+        const flagConfigs = [
+            {
+                id: 'website',
+                label: 'Website availability (clickable)',
+                activeColor: '#2980b9',
+                valueAccessor: result => result.websiteActive,
+                linkAccessor: result => result.websiteLink
+            },
+            {
+                id: 'anonymous',
+                label: 'Anonymous submission',
+                activeColor: '#8e44ad',
+                valueAccessor: result => result.anonymous
+            },
+            {
+                id: 'ethics',
+                label: 'CFP discusses ethics',
+                activeColor: '#16a085',
+                valueAccessor: result => result.ethics
+            },
+            {
+                id: 'conflicts',
+                label: 'CFP discusses conflicts',
+                activeColor: '#c0392b',
+                valueAccessor: result => result.conflicts
+            }
+        ];
+
+        const chartConfigs = [
+            {
+                id: 'chart-pc',
+                heading: 'Size of the program committee',
+                label: 'PC size',
+                borderColor: '#e67e22',
+                backgroundColor: 'rgba(230, 126, 34, 0.12)',
+                valueAccessor: result => result.pcCount
+            },
+            {
+                id: 'chart',
+                heading: 'Number of topics of interest in the CFP',
+                label: 'Number of topics',
+                borderColor: '#3498db',
+                backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                valueAccessor: result => result.topicCount
+            }
+        ];
+
+        const analysisStartYear = 2005;
+        const analysisEndYear = 2026;
+        const loadingMessageHTML = '<p class="loading">Select a conference from the dropdown above to view its data.</p>';
+
+        function createEl(tag, props = {}, children = []) {
+            const element = document.createElement(tag);
+            Object.entries(props).forEach(([key, value]) => {
+                if (key === 'style' && typeof value === 'object') {
+                    Object.assign(element.style, value);
+                } else if (key in element) {
+                    element[key] = value;
+                } else {
+                    element.setAttribute(key, value);
+                }
+            });
+            const nodes = Array.isArray(children) ? children : [children];
+            nodes.filter(Boolean).forEach(child => {
+                element.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+            });
+            return element;
+        }
+
+        function prettyConferenceName(confKey) {
+            return conferenceNames[confKey] || confKey;
+        }
+
+        async function init() {
+            try {
+                const contentDiv = document.getElementById('content');
+                const select = document.getElementById('conference-select');
+                contentDiv.innerHTML = loadingMessageHTML;
+
+                Object.keys(conferenceNames).sort().forEach(conf => {
+                    select.appendChild(createEl('option', {
+                        value: conf,
+                        textContent: prettyConferenceName(conf)
+                    }));
+                });
+
+                select.addEventListener('change', () => {
+                    const selected = select.value;
+                    if (!selected) {
+                        contentDiv.innerHTML = loadingMessageHTML;
+                        return;
+                    }
+
+                    renderSelectedConference(selected);
+                });
+            } catch (error) {
+                console.error('Error initializing:', error);
+                document.getElementById('content').innerHTML = '<p>Error initializing page. Please try again later.</p>';
+            }
+        }
+
+        async function renderSelectedConference(conf) {
+            const contentDiv = document.getElementById('content');
+            contentDiv.innerHTML = '';
+
+            const section = createEl('div', { className: 'conference-section' });
+            const contentWrapper = createEl('div', { className: 'conference-content' });
+
+            contentWrapper.appendChild(createEl('h2', {
+                className: 'conference-title',
+                textContent: prettyConferenceName(conf)
+            }));
+
+            const flagTargets = {};
+            flagConfigs.forEach(flag => {
+                const { wrapper, container } = createFlagSection(flag.label, `${flag.id}-${conf}`);
+                contentWrapper.appendChild(wrapper);
+                flagTargets[flag.id] = container;
+            });
+
+            const chartTargets = {};
+            chartConfigs.forEach(chartConfig => {
+                chartTargets[chartConfig.id] = createChartCanvas(contentWrapper, chartConfig.heading, `${chartConfig.id}-${conf}`);
+            });
+
+            section.appendChild(contentWrapper);
+            contentDiv.appendChild(section);
+
+            const years = Array.from({ length: analysisEndYear - analysisStartYear + 1 }, (_, idx) => analysisStartYear + idx);
+            await loadConferenceData(conf, years, chartTargets['chart'], chartTargets['chart-pc'], flagTargets);
+        }
+
+        async function loadConferenceData(conf, years, topicCanvas, pcCanvas, flagTargets) {
+            const dataPromises = years.map(async year => {
+                try {
+                    const res = await fetch(`dataset/${conf}/${year}.yaml`);
+                    if (!res.ok) {
+                        return null;
+                    }
+                    const text = await res.text();
+                    const yaml = jsyaml.load(text);
+                    return parseConferenceYear(year, yaml);
+                } catch (e) {
+                    console.warn(`Skipping missing or invalid dataset file for ${conf} ${year}:`, e);
+                    return null;
+                }
+            });
+
+            const results = (await Promise.all(dataPromises)).filter(Boolean);
+            flagConfigs.forEach(flag => {
+                renderBinarySequence(flagTargets[flag.id], results, flag.valueAccessor, flag.activeColor, flag.linkAccessor);
+            });
+            chartConfigs.forEach(chartConfig => {
+                const canvas = chartConfig.id === 'chart' ? topicCanvas : pcCanvas;
+                renderChart(canvas, chartConfig.label, results, chartConfig.borderColor, chartConfig.backgroundColor, chartConfig.valueAccessor);
+            });
+        }
+
+        function parseConferenceYear(year, yaml) {
+            return {
+                year,
+                topicCount: yaml.topics ? yaml.topics.length : 0,
+                pcCount: countPCStrings(yaml.pc),
+                anonymous: !!yaml['anonymous'],
+                ethics: !!yaml['ethics-discussion'],
+                conflicts: !!yaml['conflicts'],
+                websiteActive: Boolean(yaml.website && yaml.website.url != null),
+                websiteLink: yaml.website && typeof yaml.website === 'object' ? yaml.website.url || yaml.website.archive || null : null
+            };
+        }
+
+        function countPCStrings(pcValue) {
+            if (!Array.isArray(pcValue)) {
+                return 0;
+            }
+            return pcValue.reduce((sum, entry) => {
+                if (entry && typeof entry === 'object') {
+                    Object.values(entry).forEach(value => {
+                        if (Array.isArray(value)) {
+                            sum += value.filter(item => typeof item === 'string').length;
+                        }
+                    });
+                }
+                return sum;
+            }, 0);
+        }
+
+        function createChartCanvas(parent, headingText, canvasId) {
+            parent.appendChild(createEl('h3', {
+                textContent: headingText,
+                style: { marginTop: '0', color: '#34495e' }
+            }));
+            const container = createEl('div', { className: 'chart-container' });
+            const canvas = createEl('canvas', { id: canvasId });
+            container.appendChild(canvas);
+            parent.appendChild(container);
+            return canvas;
+        }
+
+        function renderChart(canvas, label, results, borderColor, backgroundColor, valueAccessor) {
+            const ctx = canvas.getContext('2d');
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: results.map(result => result.year),
+                    datasets: [{
+                        label,
+                        data: results.map(valueAccessor),
+                        borderColor,
+                        backgroundColor,
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Count'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Year'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+        }
+
+        function createFlagSection(label, containerId) {
+            const wrapper = createEl('div', { className: 'flag-section' });
+            wrapper.appendChild(createEl('h4', { textContent: label }));
+            const container = createEl('div', {
+                className: 'flag-section-container',
+                id: containerId
+            });
+            wrapper.appendChild(container);
+            return { wrapper, container };
+        }
+
+        function renderBinarySequence(container, results, valueAccessor, activeColor, linkAccessor) {
+            container.innerHTML = '';
+            const sequence = createEl('div', { className: 'binary-sequence' });
+            results.forEach(result => {
+                const value = Boolean(valueAccessor(result));
+                const link = linkAccessor ? linkAccessor(result) : null;
+                const item = createEl(link ? 'a' : 'div', { className: 'binary-sequence-item' });
+                if (!value) {
+                    item.classList.add('off');
+                }
+                if (link) {
+                    item.href = link;
+                    item.target = '_blank';
+                    item.rel = 'noopener noreferrer';
+                }
+                item.style.background = value ? activeColor : '';
+                item.textContent = String(result.year).slice(-2);
+                item.title = `${result.year}: ${value ? 'yes' : 'no'}` + (link ? `\nLink: ${link}` : '');
+                sequence.appendChild(item);
+            });
+            container.appendChild(sequence);
+        }
+    </script>
+</body>
+</html>
