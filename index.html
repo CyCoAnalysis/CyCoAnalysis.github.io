@@ -191,7 +191,7 @@
     <div id="content"></div>
 
     <footer>
-        <p>Check out the more extensive raw data in the <a href="https://github.com/CyCoAnalysis/dataset">CyCoAnalysis dataset</a>.</p>
+        <p>Check out the more extensive raw data in the <a href="https://github.com/CyCoAnalysis/dataset">CyCoAnalysis dataset</a> and submit a pull request if you would like to contribute!</p>
         <p>Note that the website is AI-generated, but the underlying data was collected manually.</p>
     </footer>
 
@@ -284,7 +284,7 @@
 
         const analysisStartYear = 2005;
         const analysisEndYear = 2026;
-        const loadingMessageHTML = '<p class="loading">Select a conference from the dropdown above to view its data.</p>';
+        const loadingMessageHTML = '<p class="loading">Select a conference from the dropdown above to view its data or a property to see its evolution across all conferences.</p>';
 
         function createEl(tag, props = {}, children = []) {
             const element = document.createElement(tag);
@@ -627,7 +627,7 @@
         function parseConferenceYear(year, yaml) {
             return {
                 year,
-                topicCount: yaml.topics ? yaml.topics.length : 0,
+                topicCount: countTopics(yaml.topics),
                 pcCount: countPCStrings(yaml.pc),
                 anonymous: !!yaml['anonymous'],
                 ethics: !!yaml['ethics-discussion'],
@@ -651,6 +651,18 @@
                 }
                 return sum;
             }, 0);
+        }
+
+        function countTopics(topicsValue) {
+            if (topicsValue == null) return 0;
+            function rec(v) {
+                if (v == null) return 0;
+                if (typeof v === 'string') return 1;
+                if (Array.isArray(v)) return v.reduce((s, e) => s + rec(e), 0);
+                if (typeof v === 'object') return Object.values(v).reduce((s, e) => s + rec(e), 0);
+                return 0;
+            }
+            return rec(topicsValue);
         }
 
         function createChartCanvas(parent, headingText, canvasId) {
