@@ -80,6 +80,26 @@
             font-size: 1rem;
             min-width: 40px;
         }
+        .conference-checkbox-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .conference-checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            background: #f8f9fb;
+            border: 1px solid #dde2ea;
+            border-radius: 10px;
+            padding: 10px 12px;
+            color: #2c3e50;
+            font-size: 0.95rem;
+        }
+        .conference-checkbox-item input {
+            accent-color: #3498db;
+        }
         .selector-group label {
             display: block;
             font-weight: 700;
@@ -240,6 +260,28 @@
             }
         ];
 
+        const conferenceColors = [
+            '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
+        ];
+
+        const propertyConfigs = [
+            ...flagConfigs.map(flag => ({ ...flag, type: 'binary' })),
+            {
+                id: 'pc',
+                label: 'Program committee size',
+                type: 'metric',
+                heading: 'Program committee size',
+                valueAccessor: result => result.pcCount
+            },
+            {
+                id: 'topics',
+                label: 'Number of CFP topics',
+                type: 'metric',
+                heading: 'Number of CFP topics',
+                valueAccessor: result => result.topicCount
+            }
+        ];
+
         const analysisStartYear = 2005;
         const analysisEndYear = 2026;
         const loadingMessageHTML = '<p class="loading">Select a conference from the dropdown above to view its data.</p>';
@@ -280,10 +322,10 @@
                     }));
                 });
 
-                flagConfigs.forEach(flag => {
+                propertyConfigs.forEach(property => {
                     propertySelect.appendChild(createEl('option', {
-                        value: flag.id,
-                        textContent: flag.label
+                        value: property.id,
+                        textContent: property.label
                     }));
                 });
 
@@ -349,24 +391,27 @@
             const contentDiv = document.getElementById('content');
             contentDiv.innerHTML = '';
 
-            const flagConfig = flagConfigs.find(f => f.id === propertyId);
-            if (!flagConfig) return;
+            const propertyConfig = propertyConfigs.find(p => p.id === propertyId);
+            if (!propertyConfig) return;
 
             const section = createEl('div', { className: 'conference-section' });
             const contentWrapper = createEl('div', { className: 'conference-content' });
 
             contentWrapper.appendChild(createEl('h2', {
                 className: 'conference-title',
-                textContent: flagConfig.label
+                textContent: propertyConfig.label
             }));
-
-            const propertyListContainer = createEl('div', { id: `property-${propertyId}-list` });
-            contentWrapper.appendChild(propertyListContainer);
 
             section.appendChild(contentWrapper);
             contentDiv.appendChild(section);
 
-            await loadPropertyDataForAllConferences(propertyId, propertyListContainer);
+            if (propertyConfig.type === 'metric') {
+                await renderMetricPropertyView(propertyConfig, contentWrapper);
+            } else {
+                const propertyListContainer = createEl('div', { id: `property-${propertyId}-list` });
+                contentWrapper.appendChild(propertyListContainer);
+                await loadPropertyDataForAllConferences(propertyId, propertyListContainer);
+            }
         }
 
         async function loadPropertyDataForAllConferences(propertyId, propertyListContainer) {
@@ -405,6 +450,134 @@
                 propertyListContainer.appendChild(wrapper);
                 renderBinarySequence(container, results, flagConfig.valueAccessor, flagConfig.activeColor, flagConfig.linkAccessor, { showAllYears: true });
             });
+        }
+
+        async function renderMetricPropertyView(propertyConfig, contentWrapper) {
+            const chartWrapper = createEl('div', { className: 'chart-container' });
+            const chartCanvas = createEl('canvas', { id: `metric-chart-${propertyConfig.id}` });
+            chartWrapper.appendChild(chartCanvas);
+            contentWrapper.appendChild(chartWrapper);
+            const checkboxContainer = createEl('div', { id: `conference-checkboxes-${propertyConfig.id}` });
+            contentWrapper.appendChild(checkboxContainer);
+            await loadMetricPropertyData(propertyConfig, chartCanvas, checkboxContainer);
+        }
+
+        async function loadMetricPropertyData(propertyConfig, chartCanvas, checkboxContainer) {
+            const years = Array.from({ length: analysisEndYear - analysisStartYear + 1 }, (_, idx) => analysisStartYear + idx);
+            const conferenceData = {};
+            const conferenceLabels = Object.keys(conferenceNames).sort();
+
+            for (const conf of conferenceLabels) {
+                const dataPromises = years.map(async year => {
+                    try {
+                        const res = await fetch(`dataset/${conf}/${year}.yaml`);
+                        if (!res.ok) {
+                            return null;
+                        }
+                        const text = await res.text();
+                        const yaml = jsyaml.load(text);
+                        return parseConferenceYear(year, yaml);
+                    } catch (e) {
+                        return null;
+                    }
+                });
+
+                const results = (await Promise.all(dataPromises)).filter(Boolean);
+                if (results.length > 0) {
+                    conferenceData[conf] = results;
+                }
+            }
+
+            const availableConferences = Object.keys(conferenceData).sort();
+            if (availableConferences.length === 0) {
+                checkboxContainer.appendChild(createEl('p', { textContent: 'No conference data available for this property.' }));
+                return;
+            }
+
+            const chart = new Chart(chartCanvas.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: years,
+                    datasets: buildMetricDatasets(availableConferences, conferenceData, years, propertyConfig)
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    spanGaps: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: propertyConfig.label
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Year'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+
+            createMetricCheckboxes(checkboxContainer, availableConferences, chart, conferenceData, propertyConfig, years);
+        }
+
+        function buildMetricDatasets(conferenceIds, conferenceData, years, propertyConfig) {
+            return conferenceIds.map((conf, index) => {
+                const resultByYear = Object.fromEntries(conferenceData[conf].map(result => [result.year, result]));
+                return {
+                    label: prettyConferenceName(conf),
+                    data: years.map(year => {
+                        const result = resultByYear[year];
+                        return result ? propertyConfig.valueAccessor(result) : null;
+                    }),
+                    borderColor: conferenceColors[index % conferenceColors.length],
+                    backgroundColor: 'transparent',
+                    borderWidth: 2,
+                    fill: false,
+                    tension: 0.1,
+                    pointRadius: 3,
+                    spanGaps: false,
+                    hidden: false
+                };
+            });
+        }
+
+        function createMetricCheckboxes(container, conferenceIds, chart, conferenceData, propertyConfig, years) {
+            container.innerHTML = '';
+            const list = createEl('div', { className: 'conference-checkbox-list' });
+
+            conferenceIds.forEach((conf, index) => {
+                const checkboxId = `checkbox-${propertyConfig.id}-${conf}`;
+                const input = createEl('input', {
+                    type: 'checkbox',
+                    id: checkboxId,
+                    checked: true,
+                    'data-conf': conf
+                });
+                const label = createEl('label', { className: 'conference-checkbox-item', htmlFor: checkboxId }, [
+                    input,
+                    createEl('span', { textContent: prettyConferenceName(conf) })
+                ]);
+
+                input.addEventListener('change', () => {
+                    chart.data.datasets[index].hidden = !input.checked;
+                    chart.update();
+                });
+
+                list.appendChild(label);
+            });
+
+            container.appendChild(list);
         }
 
         async function loadConferenceData(conf, years, topicCanvas, pcCanvas, flagTargets) {
