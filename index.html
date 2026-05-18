@@ -59,18 +59,34 @@
             font-size: 1.5rem;
         }
         #selector-container {
-            max-width: 500px;
+            max-width: 900px;
             margin: 0 auto 30px auto;
             text-align: center;
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
         }
-        #selector-container label {
+        .selector-group {
+            flex: 0 1 auto;
+            min-width: 280px;
+        }
+        .selector-or {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            color: #2c3e50;
+            font-size: 1rem;
+            min-width: 40px;
+        }
+        .selector-group label {
             display: block;
             font-weight: 700;
             margin-bottom: 0.5rem;
         }
-        #conference-select {
+        #conference-select, #property-select {
             width: 100%;
-            max-width: 400px;
             padding: 10px;
             border-radius: 8px;
             border: 1px solid #ccc;
@@ -110,6 +126,12 @@
             color: #495057;
             border-color: #c4c8d2;
         }
+        .binary-sequence-item.missing {
+            background: #f8fafc;
+            color: #6b7280;
+            border-style: dashed;
+            opacity: 0.95;
+        }
         .loading {
             text-align: center;
             font-style: italic;
@@ -131,10 +153,19 @@
     </header>
 
     <div id="selector-container" class="conference-section" style="padding:18px 25px;">
-        <label for="conference-select">Choose a conference:</label>
-        <select id="conference-select">
-            <option value="">-- Select a conference --</option>
-        </select>
+        <div class="selector-group">
+            <label for="conference-select">Choose a conference:</label>
+            <select id="conference-select">
+                <option value="">-- Select a conference --</option>
+            </select>
+        </div>
+        <div class="selector-or">OR</div>
+        <div class="selector-group">
+            <label for="property-select">Choose a property:</label>
+            <select id="property-select">
+                <option value="">-- Select a property --</option>
+            </select>
+        </div>
     </div>
 
     <div id="content"></div>
@@ -238,24 +269,44 @@
         async function init() {
             try {
                 const contentDiv = document.getElementById('content');
-                const select = document.getElementById('conference-select');
+                const conferenceSelect = document.getElementById('conference-select');
+                const propertySelect = document.getElementById('property-select');
                 contentDiv.innerHTML = loadingMessageHTML;
 
                 Object.keys(conferenceNames).sort().forEach(conf => {
-                    select.appendChild(createEl('option', {
+                    conferenceSelect.appendChild(createEl('option', {
                         value: conf,
                         textContent: prettyConferenceName(conf)
                     }));
                 });
 
-                select.addEventListener('change', () => {
-                    const selected = select.value;
+                flagConfigs.forEach(flag => {
+                    propertySelect.appendChild(createEl('option', {
+                        value: flag.id,
+                        textContent: flag.label
+                    }));
+                });
+
+                conferenceSelect.addEventListener('change', () => {
+                    propertySelect.value = '';
+                    const selected = conferenceSelect.value;
                     if (!selected) {
                         contentDiv.innerHTML = loadingMessageHTML;
                         return;
                     }
 
                     renderSelectedConference(selected);
+                });
+
+                propertySelect.addEventListener('change', () => {
+                    conferenceSelect.value = '';
+                    const selected = propertySelect.value;
+                    if (!selected) {
+                        contentDiv.innerHTML = loadingMessageHTML;
+                        return;
+                    }
+
+                    renderPropertyForAllConferences(selected);
                 });
             } catch (error) {
                 console.error('Error initializing:', error);
@@ -294,6 +345,68 @@
             await loadConferenceData(conf, years, chartTargets['chart'], chartTargets['chart-pc'], flagTargets);
         }
 
+        async function renderPropertyForAllConferences(propertyId) {
+            const contentDiv = document.getElementById('content');
+            contentDiv.innerHTML = '';
+
+            const flagConfig = flagConfigs.find(f => f.id === propertyId);
+            if (!flagConfig) return;
+
+            const section = createEl('div', { className: 'conference-section' });
+            const contentWrapper = createEl('div', { className: 'conference-content' });
+
+            contentWrapper.appendChild(createEl('h2', {
+                className: 'conference-title',
+                textContent: flagConfig.label
+            }));
+
+            const propertyListContainer = createEl('div', { id: `property-${propertyId}-list` });
+            contentWrapper.appendChild(propertyListContainer);
+
+            section.appendChild(contentWrapper);
+            contentDiv.appendChild(section);
+
+            await loadPropertyDataForAllConferences(propertyId, propertyListContainer);
+        }
+
+        async function loadPropertyDataForAllConferences(propertyId, propertyListContainer) {
+            const flagConfig = flagConfigs.find(f => f.id === propertyId);
+            if (!flagConfig) return;
+
+            const years = Array.from({ length: analysisEndYear - analysisStartYear + 1 }, (_, idx) => analysisStartYear + idx);
+            const conferencesData = {};
+
+            for (const conf of Object.keys(conferenceNames)) {
+                const dataPromises = years.map(async year => {
+                    try {
+                        const res = await fetch(`dataset/${conf}/${year}.yaml`);
+                        if (!res.ok) {
+                            return null;
+                        }
+                        const text = await res.text();
+                        const yaml = jsyaml.load(text);
+                        return parseConferenceYear(year, yaml);
+                    } catch (e) {
+                        return null;
+                    }
+                });
+
+                const results = (await Promise.all(dataPromises)).filter(Boolean);
+                if (results.length > 0) {
+                    conferencesData[conf] = results;
+                }
+            }
+
+            Object.keys(conferenceNames).sort().forEach(conf => {
+                const results = conferencesData[conf] || [];
+                if (results.length === 0) return;
+
+                const { wrapper, container } = createFlagSection(prettyConferenceName(conf), `property-${propertyId}-${conf}`);
+                propertyListContainer.appendChild(wrapper);
+                renderBinarySequence(container, results, flagConfig.valueAccessor, flagConfig.activeColor, flagConfig.linkAccessor, { showAllYears: true });
+            });
+        }
+
         async function loadConferenceData(conf, years, topicCanvas, pcCanvas, flagTargets) {
             const dataPromises = years.map(async year => {
                 try {
@@ -312,7 +425,25 @@
 
             const results = (await Promise.all(dataPromises)).filter(Boolean);
             flagConfigs.forEach(flag => {
-                renderBinarySequence(flagTargets[flag.id], results, flag.valueAccessor, flag.activeColor, flag.linkAccessor);
+                const target = flagTargets[flag.id];
+                if (!target) return;
+                if (results.length === 0) {
+                    renderBinarySequence(target, results, flag.valueAccessor, flag.activeColor, flag.linkAccessor);
+                    return;
+                }
+                const yearsPresent = results.map(r => r.year).sort((a, b) => a - b);
+                const minY = yearsPresent[0];
+                const maxY = yearsPresent[yearsPresent.length - 1];
+                const yearSet = new Set(yearsPresent);
+                let hasGap = false;
+                for (let y = minY; y <= maxY; y++) {
+                    if (!yearSet.has(y)) { hasGap = true; break; }
+                }
+                if (hasGap) {
+                    renderBinarySequence(target, results, flag.valueAccessor, flag.activeColor, flag.linkAccessor, { rangeStart: minY, rangeEnd: maxY });
+                } else {
+                    renderBinarySequence(target, results, flag.valueAccessor, flag.activeColor, flag.linkAccessor);
+                }
             });
             chartConfigs.forEach(chartConfig => {
                 const canvas = chartConfig.id === 'chart' ? topicCanvas : pcCanvas;
@@ -415,26 +546,81 @@
             return { wrapper, container };
         }
 
-        function renderBinarySequence(container, results, valueAccessor, activeColor, linkAccessor) {
+        function renderBinarySequence(container, results, valueAccessor, activeColor, linkAccessor, options = {}) {
+            // options: { showAllYears: boolean }
             container.innerHTML = '';
             const sequence = createEl('div', { className: 'binary-sequence' });
-            results.forEach(result => {
-                const value = Boolean(valueAccessor(result));
-                const link = linkAccessor ? linkAccessor(result) : null;
-                const item = createEl(link ? 'a' : 'div', { className: 'binary-sequence-item' });
-                if (!value) {
-                    item.classList.add('off');
+
+            if (options.rangeStart != null && options.rangeEnd != null) {
+                const byYear = {};
+                results.forEach(r => { byYear[r.year] = r; });
+                for (let y = options.rangeStart; y <= options.rangeEnd; y++) {
+                    const result = byYear[y] || null;
+                    const hasData = !!result;
+                    const value = hasData ? Boolean(valueAccessor(result)) : false;
+                    const link = hasData && linkAccessor ? linkAccessor(result) : null;
+                    const item = createEl(link ? 'a' : 'div', { className: 'binary-sequence-item' });
+                    if (!hasData) {
+                        item.classList.add('missing');
+                        item.classList.add('off');
+                    } else if (!value) {
+                        item.classList.add('off');
+                    }
+                    if (link) {
+                        item.href = link;
+                        item.target = '_blank';
+                        item.rel = 'noopener noreferrer';
+                    }
+                    item.style.background = (hasData && value) ? activeColor : '';
+                    item.textContent = String(y).slice(-2);
+                    item.title = hasData ? `${y}: ${value ? 'yes' : 'no'}` + (link ? `\nLink: ${link}` : '') : `${y}: (no data)`;
+                    sequence.appendChild(item);
                 }
-                if (link) {
-                    item.href = link;
-                    item.target = '_blank';
-                    item.rel = 'noopener noreferrer';
+            } else if (options.showAllYears) {
+                const byYear = {};
+                results.forEach(r => { byYear[r.year] = r; });
+                for (let y = analysisStartYear; y <= analysisEndYear; y++) {
+                    const result = byYear[y] || null;
+                    const hasData = !!result;
+                    const value = hasData ? Boolean(valueAccessor(result)) : false;
+                    const link = hasData && linkAccessor ? linkAccessor(result) : null;
+                    const item = createEl(link ? 'a' : 'div', { className: 'binary-sequence-item' });
+                    if (!hasData) {
+                        item.classList.add('missing');
+                        item.classList.add('off');
+                    } else if (!value) {
+                        item.classList.add('off');
+                    }
+                    if (link) {
+                        item.href = link;
+                        item.target = '_blank';
+                        item.rel = 'noopener noreferrer';
+                    }
+                    item.style.background = (hasData && value) ? activeColor : '';
+                    item.textContent = String(y).slice(-2);
+                    item.title = hasData ? `${y}: ${value ? 'yes' : 'no'}` + (link ? `\nLink: ${link}` : '') : `${y}: (no data)`;
+                    sequence.appendChild(item);
                 }
-                item.style.background = value ? activeColor : '';
-                item.textContent = String(result.year).slice(-2);
-                item.title = `${result.year}: ${value ? 'yes' : 'no'}` + (link ? `\nLink: ${link}` : '');
-                sequence.appendChild(item);
-            });
+            } else {
+                results.forEach(result => {
+                    const value = Boolean(valueAccessor(result));
+                    const link = linkAccessor ? linkAccessor(result) : null;
+                    const item = createEl(link ? 'a' : 'div', { className: 'binary-sequence-item' });
+                    if (!value) {
+                        item.classList.add('off');
+                    }
+                    if (link) {
+                        item.href = link;
+                        item.target = '_blank';
+                        item.rel = 'noopener noreferrer';
+                    }
+                    item.style.background = value ? activeColor : '';
+                    item.textContent = String(result.year).slice(-2);
+                    item.title = `${result.year}: ${value ? 'yes' : 'no'}` + (link ? `\nLink: ${link}` : '');
+                    sequence.appendChild(item);
+                });
+            }
+
             container.appendChild(sequence);
         }
     </script>
