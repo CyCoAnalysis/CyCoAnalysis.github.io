@@ -308,6 +308,10 @@
             return conferenceNames[confKey] || confKey;
         }
 
+        function createLoadingMessage() {
+            return createEl('p', { className: 'loading', textContent: 'Loading...' });
+        }
+
         async function init() {
             try {
                 const contentDiv = document.getElementById('content');
@@ -367,6 +371,8 @@
                 className: 'conference-title',
                 textContent: prettyConferenceName(conf)
             }));
+            const loadingIndicator = createLoadingMessage();
+            contentWrapper.appendChild(loadingIndicator);
 
             const flagTargets = {};
             flagConfigs.forEach(flag => {
@@ -384,7 +390,11 @@
             contentDiv.appendChild(section);
 
             const years = Array.from({ length: analysisEndYear - analysisStartYear + 1 }, (_, idx) => analysisStartYear + idx);
-            await loadConferenceData(conf, years, chartTargets['chart'], chartTargets['chart-pc'], flagTargets);
+            try {
+                await loadConferenceData(conf, years, chartTargets['chart'], chartTargets['chart-pc'], flagTargets);
+            } finally {
+                loadingIndicator.remove();
+            }
         }
 
         async function renderPropertyForAllConferences(propertyId) {
@@ -401,16 +411,22 @@
                 className: 'conference-title',
                 textContent: propertyConfig.label
             }));
+            const loadingIndicator = createLoadingMessage();
+            contentWrapper.appendChild(loadingIndicator);
 
             section.appendChild(contentWrapper);
             contentDiv.appendChild(section);
 
-            if (propertyConfig.type === 'metric') {
-                await renderMetricPropertyView(propertyConfig, contentWrapper);
-            } else {
-                const propertyListContainer = createEl('div', { id: `property-${propertyId}-list` });
-                contentWrapper.appendChild(propertyListContainer);
-                await loadPropertyDataForAllConferences(propertyId, propertyListContainer);
+            try {
+                if (propertyConfig.type === 'metric') {
+                    await renderMetricPropertyView(propertyConfig, contentWrapper);
+                } else {
+                    const propertyListContainer = createEl('div', { id: `property-${propertyId}-list` });
+                    contentWrapper.appendChild(propertyListContainer);
+                    await loadPropertyDataForAllConferences(propertyId, propertyListContainer);
+                }
+            } finally {
+                loadingIndicator.remove();
             }
         }
 
