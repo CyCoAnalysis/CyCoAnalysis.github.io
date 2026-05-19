@@ -38,7 +38,8 @@
         }
         .flag-section {
             display: block;
-            width: max-content;
+            width: 100%;
+            max-width: 100%;
             text-align: left;
             margin: 0 auto 20px auto;
         }
@@ -123,8 +124,22 @@
             gap: 6px;
             justify-content: center;
             margin-top: 12px;
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            padding-bottom: 8px;
+        }
+        .binary-sequence::-webkit-scrollbar {
+            height: 6px;
+        }
+        .binary-sequence::-webkit-scrollbar-thumb {
+            background: rgba(0, 0, 0, 0.15);
+            border-radius: 10px;
         }
         .binary-sequence-item {
+            flex: 0 0 auto;
             width: 30px;
             height: 30px;
             border-radius: 8px;
