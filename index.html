@@ -102,6 +102,56 @@
         .conference-checkbox-item input {
             accent-color: #3498db;
         }
+        .cycles-section {
+            margin-top: 30px;
+        }
+        .cycles-summary {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .cycles-summary-item {
+            width: 220px;
+            box-sizing: border-box;
+            background: #f8fbff;
+            border: 1px solid #dbe9ff;
+            border-radius: 14px;
+            padding: 12px;
+        }
+        .cycles-summary-item h4 {
+            margin: 0 0 8px;
+            font-size: 0.98rem;
+            color: #1f2937;
+        }
+        .cycles-summary-item div {
+            margin-bottom: 8px;
+            font-size: 0.92rem;
+            color: #334155;
+        }
+        .cycles-status {
+            display: block;
+        }
+        .cycles-badge {
+            display: block;
+            width: 100%;
+            box-sizing: border-box;
+            border-radius: 999px;
+            padding: 6px 10px;
+            font-size: 0.8rem;
+            line-height: 1.2;
+            font-weight: 600;
+            margin-bottom: 6px;
+            text-align: center;
+        }
+        .cycles-badge.present {
+            background: #def7ec;
+            color: #0f766e;
+        }
+        .cycles-badge.missing {
+            background: #f3f4f6;
+            color: #475569;
+        }
         .selector-group label {
             display: block;
             font-weight: 700;
@@ -407,7 +457,8 @@
 
             const years = Array.from({ length: analysisEndYear - analysisStartYear + 1 }, (_, idx) => analysisStartYear + idx);
             try {
-                await loadConferenceData(conf, years, chartTargets['chart'], chartTargets['chart-pc'], flagTargets);
+                const results = await loadConferenceData(conf, years, chartTargets['chart'], chartTargets['chart-pc'], flagTargets);
+                renderCycleSummary(contentWrapper, results);
             } finally {
                 loadingIndicator.remove();
             }
@@ -654,9 +705,11 @@
                 const canvas = chartConfig.id === 'chart' ? topicCanvas : pcCanvas;
                 renderChart(canvas, chartConfig.label, results, chartConfig.borderColor, chartConfig.backgroundColor, chartConfig.valueAccessor);
             });
+            return results;
         }
 
         function parseConferenceYear(year, yaml) {
+            const cycleSummary = analyzeCycles(yaml.cycles);
             return {
                 year,
                 topicCount: countTopics(yaml.topics),
@@ -665,8 +718,61 @@
                 ethics: !!yaml['ethics-discussion'],
                 conflicts: !!yaml['conflicts'],
                 websiteActive: Boolean(yaml.website && yaml.website.url != null),
-                websiteLink: yaml.website && typeof yaml.website === 'object' ? yaml.website.url || yaml.website.archive || null : null
+                websiteLink: yaml.website && typeof yaml.website === 'object' ? yaml.website.url || yaml.website.archive || null : null,
+                cycleCount: cycleSummary.count,
+                earlyReject: cycleSummary.earlyReject,
+                rebuttal: cycleSummary.rebuttal,
+                revision: cycleSummary.revision
             };
+        }
+
+        function analyzeCycles(cyclesValue) {
+            if (!Array.isArray(cyclesValue)) {
+                return { count: 0, earlyReject: false, rebuttal: false, revision: false };
+            }
+            return cyclesValue.reduce((summary, cycle) => {
+                const props = cycle && typeof cycle === 'object' ? Object.values(cycle)[0] : null;
+                if (!props || typeof props !== 'object') {
+                    return summary;
+                }
+                const hasEarlyReject = typeof props['early-reject'] === 'string';
+                const hasRebuttal = typeof props['rebuttal-start'] === 'string' || typeof props['rebuttal-end'] === 'string';
+                const hasRevision = typeof props['revision-submission'] === 'string' || typeof props['revision-notification'] === 'string';
+                return {
+                    count: summary.count + 1,
+                    earlyReject: summary.earlyReject || hasEarlyReject,
+                    rebuttal: summary.rebuttal || hasRebuttal,
+                    revision: summary.revision || hasRevision
+                };
+            }, { count: 0, earlyReject: false, rebuttal: false, revision: false });
+        }
+
+        function renderCycleSummary(parent, results) {
+            const section = createEl('div', { className: 'cycles-section' });
+            section.appendChild(createEl('h3', { textContent: 'Submission cycles overview' }));
+            const summaryList = createEl('div', { className: 'cycles-summary' });
+
+            results.forEach(result => {
+                const item = createEl('div', { className: 'cycles-summary-item' });
+                item.appendChild(createEl('h4', { textContent: result.year.toString() }));
+                item.appendChild(createEl('div', { textContent: `Submission cycles: ${result.cycleCount}` }));
+                const statusRow = createEl('div', { className: 'cycles-status' });
+                statusRow.appendChild(renderBadge('early-reject', result.earlyReject));
+                statusRow.appendChild(renderBadge('rebuttal', result.rebuttal));
+                statusRow.appendChild(renderBadge('revision', result.revision));
+                item.appendChild(statusRow);
+                summaryList.appendChild(item);
+            });
+
+            section.appendChild(summaryList);
+            parent.appendChild(section);
+        }
+
+        function renderBadge(label, present) {
+            return createEl('span', {
+                className: `cycles-badge ${present ? 'present' : 'missing'}`,
+                textContent: `${label}: ${present ? 'yes' : 'no'}`
+            });
         }
 
         function countPCStrings(pcValue) {
