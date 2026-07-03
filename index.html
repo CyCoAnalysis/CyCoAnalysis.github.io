@@ -288,6 +288,13 @@
                 linkAccessor: result => result.websiteLink
             },
             {
+                id: 'artifactsEvaluation',
+                label: 'Artifact evaluation (clickable)',
+                activeColor: '#d35400',
+                valueAccessor: result => result.artifactsEvaluationActive,
+                linkAccessor: result => result.artifactsEvaluationLink
+            },
+            {
                 id: 'anonymous',
                 label: 'Anonymous submission',
                 activeColor: '#8e44ad',
@@ -737,6 +744,8 @@
                 conflicts: !!yaml['conflicts'],
                 websiteActive: Boolean(yaml.website && yaml.website.url != null),
                 websiteLink: yaml.website && typeof yaml.website === 'object' ? yaml.website.url || yaml.website.archive || null : null,
+                artifactsEvaluationActive: Boolean(yaml.artifacts && yaml.artifacts.evaluation),
+                artifactsEvaluationLink: yaml.artifacts && yaml.artifacts.evaluation && typeof yaml.artifacts.evaluation === 'object' ? yaml.artifacts.evaluation.call || null : null,
                 cycleCount: cycleSummary.count,
                 earlyReject: cycleSummary.earlyReject,
                 rebuttal: cycleSummary.rebuttal,
