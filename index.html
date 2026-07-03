@@ -376,9 +376,11 @@
 
         const analysisStartYear = 2005;
         const analysisEndYear = 2026;
+        const allYears = Array.from({ length: analysisEndYear - analysisStartYear + 1 }, (_, idx) => analysisStartYear + idx);
         const loadingMessageHTML = '<p class="loading">Select a conference from the dropdown above to view its data or a property to see its evolution across all conferences.</p>';
 
         let activeCharts = [];
+        const yamlCache = new Map();
 
         function destroyActiveCharts() {
             activeCharts.forEach(chart => chart.destroy());
@@ -491,9 +493,8 @@
             section.appendChild(contentWrapper);
             contentDiv.appendChild(section);
 
-            const years = Array.from({ length: analysisEndYear - analysisStartYear + 1 }, (_, idx) => analysisStartYear + idx);
             try {
-                const results = await loadConferenceData(conf, years, chartTargets['chart'], chartTargets['chart-pc'], flagTargets);
+                const results = await loadConferenceData(conf, allYears, chartTargets['chart'], chartTargets['chart-pc'], flagTargets);
                 renderCycleSummary(contentWrapper, results);
             } finally {
                 loadingIndicator.remove();
@@ -538,9 +539,8 @@
             const flagConfig = flagConfigs.find(f => f.id === propertyId);
             if (!flagConfig) return;
 
-            const years = Array.from({ length: analysisEndYear - analysisStartYear + 1 }, (_, idx) => analysisStartYear + idx);
             const confKeys = Object.keys(conferenceNames);
-            const allResults = await Promise.all(confKeys.map(conf => fetchConferenceYearsData(conf, years)));
+            const allResults = await Promise.all(confKeys.map(conf => fetchConferenceYearsData(conf, allYears)));
             const conferencesData = {};
             confKeys.forEach((conf, idx) => {
                 if (allResults[idx].length > 0) {
@@ -569,9 +569,8 @@
         }
 
         async function loadMetricPropertyData(propertyConfig, chartCanvas, checkboxContainer) {
-            const years = Array.from({ length: analysisEndYear - analysisStartYear + 1 }, (_, idx) => analysisStartYear + idx);
             const conferenceLabels = Object.keys(conferenceNames).sort();
-            const allResults = await Promise.all(conferenceLabels.map(conf => fetchConferenceYearsData(conf, years)));
+            const allResults = await Promise.all(conferenceLabels.map(conf => fetchConferenceYearsData(conf, allYears)));
             const conferenceData = {};
             conferenceLabels.forEach((conf, idx) => {
                 if (allResults[idx].length > 0) {
@@ -588,8 +587,8 @@
             const chart = new Chart(chartCanvas.getContext('2d'), {
                 type: 'line',
                 data: {
-                    labels: years,
-                    datasets: buildMetricDatasets(availableConferences, conferenceData, years, propertyConfig)
+                    labels: allYears,
+                    datasets: buildMetricDatasets(availableConferences, conferenceData, allYears, propertyConfig)
                 },
                 options: {
                     responsive: true,
@@ -620,7 +619,7 @@
             });
             activeCharts.push(chart);
 
-            createMetricCheckboxes(checkboxContainer, availableConferences, chart, conferenceData, propertyConfig, years);
+            createMetricCheckboxes(checkboxContainer, availableConferences, chart, conferenceData, propertyConfig, allYears);
         }
 
         function buildMetricDatasets(conferenceIds, conferenceData, years, propertyConfig) {
@@ -673,42 +672,11 @@
         }
 
         async function loadConferenceData(conf, years, topicCanvas, pcCanvas, flagTargets) {
-            const dataPromises = years.map(async year => {
-                try {
-                    const res = await fetch(`dataset/${conf}/${year}.yaml`);
-                    if (!res.ok) {
-                        return null;
-                    }
-                    const text = await res.text();
-                    const yaml = jsyaml.load(text);
-                    return parseConferenceYear(year, yaml);
-                } catch (e) {
-                    console.warn(`Skipping missing or invalid dataset file for ${conf} ${year}:`, e);
-                    return null;
-                }
-            });
-
-            const results = (await Promise.all(dataPromises)).filter(Boolean);
+            const results = await fetchConferenceYearsData(conf, years);
             flagConfigs.forEach(flag => {
                 const target = flagTargets[flag.id];
                 if (!target) return;
-                if (results.length === 0) {
-                    renderBinarySequence(target, results, flag.valueAccessor, flag.activeColor, flag.linkAccessor);
-                    return;
-                }
-                const yearsPresent = results.map(r => r.year).sort((a, b) => a - b);
-                const minY = yearsPresent[0];
-                const maxY = yearsPresent[yearsPresent.length - 1];
-                const yearSet = new Set(yearsPresent);
-                let hasGap = false;
-                for (let y = minY; y <= maxY; y++) {
-                    if (!yearSet.has(y)) { hasGap = true; break; }
-                }
-                if (hasGap) {
-                    renderBinarySequence(target, results, flag.valueAccessor, flag.activeColor, flag.linkAccessor, { rangeStart: minY, rangeEnd: maxY });
-                } else {
-                    renderBinarySequence(target, results, flag.valueAccessor, flag.activeColor, flag.linkAccessor);
-                }
+                renderBinarySequence(target, results, flag.valueAccessor, flag.activeColor, flag.linkAccessor);
             });
             chartConfigs.forEach(chartConfig => {
                 const canvas = chartConfig.id === 'chart' ? topicCanvas : pcCanvas;
@@ -719,17 +687,23 @@
 
         async function fetchConferenceYearsData(conf, years) {
             const dataPromises = years.map(async year => {
+                const cacheKey = `${conf}/${year}`;
+                if (yamlCache.has(cacheKey)) {
+                    return yamlCache.get(cacheKey);
+                }
+                let result = null;
                 try {
                     const res = await fetch(`dataset/${conf}/${year}.yaml`);
-                    if (!res.ok) {
-                        return null;
+                    if (res.ok) {
+                        const text = await res.text();
+                        const yaml = jsyaml.load(text);
+                        result = parseConferenceYear(year, yaml);
                     }
-                    const text = await res.text();
-                    const yaml = jsyaml.load(text);
-                    return parseConferenceYear(year, yaml);
                 } catch (e) {
-                    return null;
+                    console.warn(`Skipping missing or invalid dataset file for ${conf} ${year}:`, e);
                 }
+                yamlCache.set(cacheKey, result);
+                return result;
             });
             return (await Promise.all(dataPromises)).filter(Boolean);
         }
@@ -902,74 +876,39 @@
             container.innerHTML = '';
             const sequence = createEl('div', { className: 'binary-sequence' });
 
-            if (options.rangeStart != null && options.rangeEnd != null) {
-                const byYear = {};
-                results.forEach(r => { byYear[r.year] = r; });
-                for (let y = options.rangeStart; y <= options.rangeEnd; y++) {
-                    const result = byYear[y] || null;
-                    const hasData = !!result;
-                    const value = hasData ? Boolean(valueAccessor(result)) : false;
-                    const link = hasData && linkAccessor ? linkAccessor(result) : null;
-                    const item = createEl(link ? 'a' : 'div', { className: 'binary-sequence-item' });
-                    if (!hasData) {
-                        item.classList.add('missing');
-                        item.classList.add('off');
-                    } else if (!value) {
-                        item.classList.add('off');
-                    }
-                    if (link) {
-                        item.href = link;
-                        item.target = '_blank';
-                        item.rel = 'noopener noreferrer';
-                    }
-                    item.style.background = (hasData && value) ? activeColor : '';
-                    item.textContent = String(y).slice(-2);
-                    item.title = hasData ? `${y}: ${value ? 'yes' : 'no'}` + (link ? `\nLink: ${link}` : '') : `${y}: (no data)`;
-                    sequence.appendChild(item);
+            let startYear = options.rangeStart;
+            let endYear = options.rangeEnd;
+            if (startYear == null || endYear == null) {
+                if (options.showAllYears) {
+                    startYear = analysisStartYear;
+                    endYear = analysisEndYear;
+                } else if (results.length > 0) {
+                    startYear = results[0].year;
+                    endYear = results[results.length - 1].year;
                 }
-            } else if (options.showAllYears) {
-                const byYear = {};
-                results.forEach(r => { byYear[r.year] = r; });
-                for (let y = analysisStartYear; y <= analysisEndYear; y++) {
-                    const result = byYear[y] || null;
-                    const hasData = !!result;
-                    const value = hasData ? Boolean(valueAccessor(result)) : false;
-                    const link = hasData && linkAccessor ? linkAccessor(result) : null;
-                    const item = createEl(link ? 'a' : 'div', { className: 'binary-sequence-item' });
-                    if (!hasData) {
-                        item.classList.add('missing');
-                        item.classList.add('off');
-                    } else if (!value) {
-                        item.classList.add('off');
-                    }
-                    if (link) {
-                        item.href = link;
-                        item.target = '_blank';
-                        item.rel = 'noopener noreferrer';
-                    }
-                    item.style.background = (hasData && value) ? activeColor : '';
-                    item.textContent = String(y).slice(-2);
-                    item.title = hasData ? `${y}: ${value ? 'yes' : 'no'}` + (link ? `\nLink: ${link}` : '') : `${y}: (no data)`;
-                    sequence.appendChild(item);
+            }
+
+            const byYear = new Map(results.map(r => [r.year, r]));
+            for (let y = startYear; y <= endYear; y++) {
+                const result = byYear.get(y) || null;
+                const hasData = !!result;
+                const value = hasData ? Boolean(valueAccessor(result)) : false;
+                const link = hasData && linkAccessor ? linkAccessor(result) : null;
+                const item = createEl(link ? 'a' : 'div', { className: 'binary-sequence-item' });
+                if (!hasData) {
+                    item.classList.add('missing', 'off');
+                } else if (!value) {
+                    item.classList.add('off');
                 }
-            } else {
-                results.forEach(result => {
-                    const value = Boolean(valueAccessor(result));
-                    const link = linkAccessor ? linkAccessor(result) : null;
-                    const item = createEl(link ? 'a' : 'div', { className: 'binary-sequence-item' });
-                    if (!value) {
-                        item.classList.add('off');
-                    }
-                    if (link) {
-                        item.href = link;
-                        item.target = '_blank';
-                        item.rel = 'noopener noreferrer';
-                    }
-                    item.style.background = value ? activeColor : '';
-                    item.textContent = String(result.year).slice(-2);
-                    item.title = `${result.year}: ${value ? 'yes' : 'no'}` + (link ? `\nLink: ${link}` : '');
-                    sequence.appendChild(item);
-                });
+                if (link) {
+                    item.href = link;
+                    item.target = '_blank';
+                    item.rel = 'noopener noreferrer';
+                }
+                item.style.background = (hasData && value) ? activeColor : '';
+                item.textContent = String(y).slice(-2);
+                item.title = hasData ? `${y}: ${value ? 'yes' : 'no'}` + (link ? `\nLink: ${link}` : '') : `${y}: (no data)`;
+                sequence.appendChild(item);
             }
 
             container.appendChild(sequence);
