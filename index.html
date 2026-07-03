@@ -38,7 +38,8 @@
             text-align: center;
         }
         .flag-section {
-            display: inline-block;
+            display: block;
+            width: fit-content;
             max-width: 100%;
             text-align: left;
             margin: 0 auto 20px auto;
@@ -173,7 +174,7 @@
             display: flex;
             flex-wrap: wrap;
             gap: 6px;
-            justify-content: center;
+            justify-content: flex-start;
             margin-top: 12px;
             width: 100%;
             max-width: 100%;
@@ -377,6 +378,13 @@
         const analysisEndYear = 2026;
         const loadingMessageHTML = '<p class="loading">Select a conference from the dropdown above to view its data or a property to see its evolution across all conferences.</p>';
 
+        let activeCharts = [];
+
+        function destroyActiveCharts() {
+            activeCharts.forEach(chart => chart.destroy());
+            activeCharts = [];
+        }
+
         function createEl(tag, props = {}, children = []) {
             const element = document.createElement(tag);
             Object.entries(props).forEach(([key, value]) => {
@@ -428,6 +436,7 @@
                     propertySelect.value = '';
                     const selected = conferenceSelect.value;
                     if (!selected) {
+                        destroyActiveCharts();
                         contentDiv.innerHTML = loadingMessageHTML;
                         return;
                     }
@@ -439,6 +448,7 @@
                     conferenceSelect.value = '';
                     const selected = propertySelect.value;
                     if (!selected) {
+                        destroyActiveCharts();
                         contentDiv.innerHTML = loadingMessageHTML;
                         return;
                     }
@@ -452,6 +462,7 @@
         }
 
         async function renderSelectedConference(conf) {
+            destroyActiveCharts();
             const contentDiv = document.getElementById('content');
             contentDiv.innerHTML = '';
 
@@ -490,6 +501,7 @@
         }
 
         async function renderPropertyForAllConferences(propertyId) {
+            destroyActiveCharts();
             const contentDiv = document.getElementById('content');
             contentDiv.innerHTML = '';
 
@@ -527,28 +539,14 @@
             if (!flagConfig) return;
 
             const years = Array.from({ length: analysisEndYear - analysisStartYear + 1 }, (_, idx) => analysisStartYear + idx);
+            const confKeys = Object.keys(conferenceNames);
+            const allResults = await Promise.all(confKeys.map(conf => fetchConferenceYearsData(conf, years)));
             const conferencesData = {};
-
-            for (const conf of Object.keys(conferenceNames)) {
-                const dataPromises = years.map(async year => {
-                    try {
-                        const res = await fetch(`dataset/${conf}/${year}.yaml`);
-                        if (!res.ok) {
-                            return null;
-                        }
-                        const text = await res.text();
-                        const yaml = jsyaml.load(text);
-                        return parseConferenceYear(year, yaml);
-                    } catch (e) {
-                        return null;
-                    }
-                });
-
-                const results = (await Promise.all(dataPromises)).filter(Boolean);
-                if (results.length > 0) {
-                    conferencesData[conf] = results;
+            confKeys.forEach((conf, idx) => {
+                if (allResults[idx].length > 0) {
+                    conferencesData[conf] = allResults[idx];
                 }
-            }
+            });
 
             Object.keys(conferenceNames).sort().forEach(conf => {
                 const results = conferencesData[conf] || [];
@@ -572,29 +570,14 @@
 
         async function loadMetricPropertyData(propertyConfig, chartCanvas, checkboxContainer) {
             const years = Array.from({ length: analysisEndYear - analysisStartYear + 1 }, (_, idx) => analysisStartYear + idx);
-            const conferenceData = {};
             const conferenceLabels = Object.keys(conferenceNames).sort();
-
-            for (const conf of conferenceLabels) {
-                const dataPromises = years.map(async year => {
-                    try {
-                        const res = await fetch(`dataset/${conf}/${year}.yaml`);
-                        if (!res.ok) {
-                            return null;
-                        }
-                        const text = await res.text();
-                        const yaml = jsyaml.load(text);
-                        return parseConferenceYear(year, yaml);
-                    } catch (e) {
-                        return null;
-                    }
-                });
-
-                const results = (await Promise.all(dataPromises)).filter(Boolean);
-                if (results.length > 0) {
-                    conferenceData[conf] = results;
+            const allResults = await Promise.all(conferenceLabels.map(conf => fetchConferenceYearsData(conf, years)));
+            const conferenceData = {};
+            conferenceLabels.forEach((conf, idx) => {
+                if (allResults[idx].length > 0) {
+                    conferenceData[conf] = allResults[idx];
                 }
-            }
+            });
 
             const availableConferences = Object.keys(conferenceData).sort();
             if (availableConferences.length === 0) {
@@ -635,6 +618,7 @@
                     }
                 }
             });
+            activeCharts.push(chart);
 
             createMetricCheckboxes(checkboxContainer, availableConferences, chart, conferenceData, propertyConfig, years);
         }
@@ -731,6 +715,23 @@
                 renderChart(canvas, chartConfig.label, results, chartConfig.borderColor, chartConfig.backgroundColor, chartConfig.valueAccessor);
             });
             return results;
+        }
+
+        async function fetchConferenceYearsData(conf, years) {
+            const dataPromises = years.map(async year => {
+                try {
+                    const res = await fetch(`dataset/${conf}/${year}.yaml`);
+                    if (!res.ok) {
+                        return null;
+                    }
+                    const text = await res.text();
+                    const yaml = jsyaml.load(text);
+                    return parseConferenceYear(year, yaml);
+                } catch (e) {
+                    return null;
+                }
+            });
+            return (await Promise.all(dataPromises)).filter(Boolean);
         }
 
         function parseConferenceYear(year, yaml) {
@@ -844,7 +845,7 @@
 
         function renderChart(canvas, label, results, borderColor, backgroundColor, valueAccessor) {
             const ctx = canvas.getContext('2d');
-            new Chart(ctx, {
+            activeCharts.push(new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: results.map(result => result.year),
@@ -882,7 +883,7 @@
                         }
                     }
                 }
-            });
+            }));
         }
 
         function createFlagSection(label, containerId) {
